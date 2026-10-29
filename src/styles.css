@@ -81,6 +81,10 @@ a { color: inherit; }
 .connection-pill .status-dot { width: 7px; height: 7px; flex-basis: 7px; }
 .topbar-date { color: #627167; }
 .topbar-date svg { color: #7b9181; }
+.topbar-signout { height: 34px !important; min-height: 34px !important; padding: 0 10px !important; font-size: 10px !important; color: #a84e4c !important; border-color: #f1d5d4 !important; }
+.topbar-signout:hover { background: #fdf2f2 !important; }
+.button-danger { color: #b73937 !important; border-color: #f5c6c6 !important; background: #fff5f5 !important; }
+.button-danger:hover { background: #fde8e8 !important; }
 .mobile-menu-button { display: none !important; }
 .top-new-bill { height: 36px !important; padding: 0 13px !important; font-size: 11px !important; }
 .page-content { width: min(1440px, 100%); margin: auto; padding: 22px clamp(22px, 4vw, 55px) 18px; }

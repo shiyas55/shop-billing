@@ -7,9 +7,8 @@ import {
   Calculator, Scale, Search, Settings, Share2, ShoppingBag, Smartphone, Sparkles, Store, Trash2, Users, WalletCards, X,
 } from 'lucide-react';
 import type { CartLine, Expense, Product, ProductInput, Sale, ShopState } from './types';
-import { addDemoExpense, addDemoProduct, createDemoSale, loadDemoState, receiveDemoStock, saveDemoState } from './demo';
 import { archiveCloudProduct, createOwnedShop, getOwnedShop, loadCloudState, receiveCloudStock, renameOwnedShop, saveCloudExpense, saveCloudProduct, saveCloudSale } from './cloud';
-import { isSupabaseConfigured, supabase } from './supabase';
+import { clearSupabaseConfig, isSupabaseConfigured, saveSupabaseConfig, supabase } from './supabase';
 
 const money = (value: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number.isFinite(value) ? value : 0);
 const roundMoney = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
@@ -25,6 +24,15 @@ const stockLabel = (product: Product) => product.stockQuantity.toLocaleString('e
 
 type Tab = 'dashboard' | 'bill' | 'products' | 'customers' | 'expenses' | 'sales' | 'settings';
 type Notice = { type: 'success' | 'error' | 'info'; text: string } | null;
+
+const emptyState: ShopState = {
+  shopName: 'My Shop',
+  products: [],
+  customers: [],
+  sales: [],
+  expenses: [],
+  stockMovements: [],
+};
 
 const navItems: { id: Tab; label: string; icon: typeof House }[] = [
   { id: 'dashboard', label: 'Overview', icon: House },
@@ -52,7 +60,33 @@ function Overlay({ children, onClose, wide = false }: { children: ReactNode; onC
   </div>;
 }
 
-function AuthScreen({ onLogin }: { onLogin: (email: string, password: string) => Promise<void> }) {
+function ConnectSupabaseScreen({ onConnect }: { onConnect: (url: string, key: string) => void }) {
+  const [url, setUrl] = useState('https://nwmuneczyopsekalfbyb.supabase.co');
+  const [key, setKey] = useState('');
+  const [error, setError] = useState('');
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!key.trim()) { setError('Please enter your Supabase anon public key.'); return; }
+    onConnect(url.trim(), key.trim());
+  };
+
+  return <main className="auth-shell"><div className="auth-card">
+    <div className="auth-brand"><span className="brand-mark"><ShoppingBag size={22} /></span><span>Shop Billing</span></div>
+    <p className="eyebrow">DATABASE SETUP</p><h1>Connect Supabase</h1><p className="muted">Enter your Supabase API credentials to connect your live shop database.</p>
+    <form onSubmit={submit} className="form-stack">
+      <label>Supabase Project URL<input required type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://YOUR_PROJECT.supabase.co" /></label>
+      <label>Supabase Anon Key<input required type="text" value={key} onChange={(e) => setKey(e.target.value)} placeholder="eyJhbGciOi..." /></label>
+      {error && <p className="form-error">{error}</p>}
+      <button className="button button-primary button-full">Save & Connect</button>
+    </form>
+    <p className="auth-footnote">
+      Find your anon key in <a href="https://supabase.com/dashboard/project/nwmuneczyopsekalfbyb/settings/api" target="_blank" rel="noreferrer" style={{ textDecoration: 'underline' }}>Supabase Settings → API</a>.
+    </p>
+  </div></main>;
+}
+
+function AuthScreen({ onLogin, onResetKey }: { onLogin: (email: string, password: string) => Promise<void>; onResetKey: () => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -64,14 +98,16 @@ function AuthScreen({ onLogin }: { onLogin: (email: string, password: string) =>
   };
   return <main className="auth-shell"><div className="auth-card">
     <div className="auth-brand"><span className="brand-mark"><ShoppingBag size={22} /></span><span>Shop Billing</span></div>
-    <p className="eyebrow">OWNER ACCESS</p><h1>Welcome back</h1><p className="muted">Sign in to open your shop records.</p>
+    <p className="eyebrow">OWNER ACCESS</p><h1>Welcome back</h1><p className="muted">Sign in with your owner email and password.</p>
     <form onSubmit={submit} className="form-stack">
-      <label>Email address<input required type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" /></label>
+      <label>Email address<input required type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="admin@gmail.com" /></label>
       <label>Password<input required type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Your password" /></label>
       {error && <p className="form-error">{error}</p>}
       <button className="button button-primary button-full" disabled={busy}>{busy ? <LoaderCircle className="spin" size={17} /> : null} Sign in</button>
     </form>
-    <p className="auth-footnote">Create the owner account in Supabase Auth first. Public sign-up is disabled.</p>
+    <div className="auth-key-switch" style={{ marginTop: '14px', textAlign: 'center' }}>
+      <button type="button" className="text-button" style={{ fontSize: '11px', color: '#688273' }} onClick={onResetKey}>Change Supabase API key</button>
+    </div>
   </div></main>;
 }
 
@@ -245,12 +281,12 @@ function ExpenseForm({ onClose, onSave }: { onClose: () => void; onSave: (input:
 }
 
 function App() {
-  const [state, setState] = useState<ShopState>(() => loadDemoState());
+  const [state, setState] = useState<ShopState>(emptyState);
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [session, setSession] = useState<Session | null>(null);
-  const [sessionChecked, setSessionChecked] = useState(!isSupabaseConfigured);
+  const [sessionChecked, setSessionChecked] = useState(false);
   const [cloudShop, setCloudShop] = useState<{ id: string; name: string } | null>(null);
-  const [cloudReady, setCloudReady] = useState(!isSupabaseConfigured);
+  const [cloudReady, setCloudReady] = useState(false);
   const [cloudError, setCloudError] = useState('');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
@@ -278,7 +314,6 @@ function App() {
   const [savingName, setSavingName] = useState(false);
   const [mobileMenu, setMobileMenu] = useState(false);
 
-  const cloudMode = Boolean(isSupabaseConfigured && session && cloudShop);
   const activeProducts = useMemo(() => state.products.filter((product) => product.active), [state.products]);
   const customerStats = useMemo(() => {
     const stats = new Map<string, { bills: number; spent: number; lastVisit: string }>();
@@ -293,13 +328,18 @@ function App() {
   }, [state.sales]);
 
   useEffect(() => {
-    if (!supabase) return;
+    if (!supabase) {
+      setSessionChecked(true);
+      return;
+    }
     let alive = true;
     supabase.auth.getSession().then(({ data, error }) => {
       if (!alive) return;
       if (error) setCloudError(error.message);
       setSession(data.session);
       setSessionChecked(true);
+    }).catch(() => {
+      if (alive) setSessionChecked(true);
     });
     const { data: auth } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession); setCloudShop(null); setCloudReady(false); setCloudError('');
@@ -327,10 +367,6 @@ function App() {
   }, [session]);
 
   useEffect(() => {
-    if (!isSupabaseConfigured && !cloudMode) saveDemoState(state);
-  }, [state, cloudMode]);
-
-  useEffect(() => {
     if (!notice) return;
     const timer = window.setTimeout(() => setNotice(null), 3800);
     return () => window.clearTimeout(timer);
@@ -345,7 +381,7 @@ function App() {
 
   const login = async (email: string, password: string) => {
     if (!supabase) throw new Error('Supabase is not configured.');
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
     if (error) throw error;
   };
 
@@ -361,14 +397,9 @@ function App() {
   const saveProduct = async (input: ProductInput) => {
     setBusy(true);
     try {
-      if (cloudMode && cloudShop) {
-        await saveCloudProduct(cloudShop.id, { ...input, id: editingProduct?.id });
-        await refreshCloud();
-      } else if (editingProduct) {
-        setState((previous) => ({ ...previous, products: previous.products.map((product) => product.id === editingProduct.id ? { ...product, ...input, stockQuantity: product.stockQuantity } : product) }));
-      } else {
-        setState((previous) => addDemoProduct(previous, input));
-      }
+      if (!cloudShop) throw new Error('Shop database is not loaded.');
+      await saveCloudProduct(cloudShop.id, { ...input, id: editingProduct?.id });
+      await refreshCloud();
       setNotice({ type: 'success', text: editingProduct ? 'Product updated.' : 'Product added.' });
     } catch (error) { setNotice({ type: 'error', text: error instanceof Error ? error.message : 'Could not save product.' }); throw error; }
     finally { setBusy(false); }
@@ -378,12 +409,9 @@ function App() {
     if (!window.confirm(`Delete ${product.name} from new bills? Past receipts will be kept.`)) return;
     setBusy(true);
     try {
-      if (cloudMode && cloudShop) {
-        await archiveCloudProduct(cloudShop.id, product.id);
-        await refreshCloud();
-      } else {
-        setState((previous) => ({ ...previous, products: previous.products.map((item) => item.id === product.id ? { ...item, active: false } : item) }));
-      }
+      if (!cloudShop) throw new Error('Shop database is not loaded.');
+      await archiveCloudProduct(cloudShop.id, product.id);
+      await refreshCloud();
       setCart((current) => current.filter((item) => item.productId !== product.id));
       setNotice({ type: 'success', text: `${product.name} was removed from active products.` });
     } catch (error) { setNotice({ type: 'error', text: error instanceof Error ? error.message : 'Could not delete product.' }); }
@@ -393,16 +421,16 @@ function App() {
   const addStock = async (input: { quantity: number; unitCost: number; method: 'cash' | 'upi'; note: string }) => {
     if (!stockProduct || input.quantity <= 0) throw new Error('Enter a quantity greater than zero.');
     if (stockProduct.category === 'piece' && !Number.isInteger(input.quantity)) throw new Error('Piece quantities must be whole numbers.');
-    if (cloudMode) await receiveCloudStock({ productId: stockProduct.id, quantity: input.quantity, unitCost: input.unitCost, method: input.method, type: 'purchase', note: input.note });
-    else setState((previous) => receiveDemoStock(previous, stockProduct.id, input.quantity, input.unitCost, 'purchase', input.method, input.note));
-    if (cloudMode) await refreshCloud();
+    await receiveCloudStock({ productId: stockProduct.id, quantity: input.quantity, unitCost: input.unitCost, method: input.method, type: 'purchase', note: input.note });
+    await refreshCloud();
     setNotice({ type: 'success', text: `Added stock for ${stockProduct.name}.` });
   };
 
   const addExpense = async (input: Omit<Expense, 'id' | 'createdAt'>) => {
     if (input.amount <= 0) throw new Error('Enter an amount greater than zero.');
-    if (cloudMode && cloudShop) { await saveCloudExpense(cloudShop.id, input); await refreshCloud(); }
-    else setState((previous) => addDemoExpense(previous, input));
+    if (!cloudShop) throw new Error('Shop database is not loaded.');
+    await saveCloudExpense(cloudShop.id, input);
+    await refreshCloud();
     setNotice({ type: 'success', text: 'Expense saved.' });
   };
 
@@ -466,16 +494,11 @@ function App() {
     if (roundMoney(cash + upi) !== cartQuote.total) { setNotice({ type: 'error', text: `Cash and GPay must add up to ${money(cartQuote.total)}.` }); return; }
     setBusy(true);
     try {
-      let newSale: Sale | undefined;
-      if (cloudMode && cloudShop) {
-        const created = await saveCloudSale(cloudShop.id, { customerName, customerPhone, billDiscount: Number(billDiscount) || 0, cart, cashAmount: cash, upiAmount: upi });
-        const refreshed = await loadCloudState(cloudShop.id, cloudShop.name);
-        setState(refreshed);
-        newSale = refreshed.sales.find((sale) => sale.id === created.sale_id);
-      } else {
-        const result = createDemoSale(state, cart, { customerName, customerPhone, billDiscount: Number(billDiscount) || 0, cashAmount: cash, upiAmount: upi });
-        setState(result.state); newSale = result.sale;
-      }
+      if (!cloudShop) throw new Error('Shop database not loaded.');
+      const created = await saveCloudSale(cloudShop.id, { customerName, customerPhone, billDiscount: Number(billDiscount) || 0, cart, cashAmount: cash, upiAmount: upi });
+      const refreshed = await loadCloudState(cloudShop.id, cloudShop.name);
+      setState(refreshed);
+      const newSale = refreshed.sales.find((sale) => sale.id === created.sale_id);
       if (newSale) setReceipt(newSale);
       setCart([]); setCustomerName(''); setCustomerPhone(''); setBillDiscount('0'); setSplitCash(''); setSplitUpi('');
       setNotice({ type: 'success', text: 'Bill saved successfully.' });
@@ -486,20 +509,30 @@ function App() {
   const updateShopName = async (event: FormEvent) => {
     event.preventDefault(); setSavingName(true);
     try {
-      if (cloudMode && cloudShop) { await renameOwnedShop(cloudShop.id, shopNameInput); setCloudShop({ ...cloudShop, name: shopNameInput.trim() || 'My Shop' }); setState((previous) => ({ ...previous, shopName: shopNameInput.trim() || 'My Shop' })); }
-      else setState((previous) => ({ ...previous, shopName: shopNameInput.trim() || 'My Shop' }));
+      if (cloudShop) {
+        await renameOwnedShop(cloudShop.id, shopNameInput);
+        setCloudShop({ ...cloudShop, name: shopNameInput.trim() || 'My Shop' });
+      }
+      setState((previous) => ({ ...previous, shopName: shopNameInput.trim() || 'My Shop' }));
       setNotice({ type: 'success', text: 'Shop name saved.' });
     } catch (error) { setNotice({ type: 'error', text: error instanceof Error ? error.message : 'Could not save shop name.' }); }
     finally { setSavingName(false); }
   };
 
-  const signOut = async () => { if (supabase) await supabase.auth.signOut(); };
+  const signOut = async () => {
+    if (supabase) await supabase.auth.signOut();
+    setSession(null);
+    setCloudShop(null);
+    setState(emptyState);
+    setActiveTab('dashboard');
+  };
 
-  if (isSupabaseConfigured && !sessionChecked) return <main className="loading-screen"><LoaderCircle className="spin" size={28} /><span>Checking secure sign-in…</span></main>;
-  if (isSupabaseConfigured && !session) return <AuthScreen onLogin={login} />;
-  if (isSupabaseConfigured && session && !cloudReady) return <main className="loading-screen"><LoaderCircle className="spin" size={28} /><span>Loading your shop…</span></main>;
-  if (isSupabaseConfigured && session && !cloudShop && !cloudError) return <SetupShopScreen onCreate={createShop} error="" />;
-  if (isSupabaseConfigured && session && !cloudShop && cloudError) return <div className="setup-error"><div className="auth-card"><div className="auth-brand"><span className="brand-mark"><Store size={22} /></span><span>Shop Billing setup</span></div><h1>Database setup needed</h1><p className="muted">The app could not load the shop database. Apply the included SQL migration in Supabase, then reload this page.</p><pre>{cloudError}</pre><button className="button button-outline" onClick={() => window.location.reload()}><RefreshCw size={16} /> Reload</button></div></div>;
+  if (!isSupabaseConfigured) return <ConnectSupabaseScreen onConnect={(url, key) => { saveSupabaseConfig(key, url); window.location.reload(); }} />;
+  if (!sessionChecked) return <main className="loading-screen"><LoaderCircle className="spin" size={28} /><span>Checking sign-in…</span></main>;
+  if (!session) return <AuthScreen onLogin={login} onResetKey={() => { clearSupabaseConfig(); window.location.reload(); }} />;
+  if (session && !cloudReady) return <main className="loading-screen"><LoaderCircle className="spin" size={28} /><span>Loading shop database…</span></main>;
+  if (session && !cloudShop && !cloudError) return <SetupShopScreen onCreate={createShop} error="" />;
+  if (session && !cloudShop && cloudError) return <div className="setup-error"><div className="auth-card"><div className="auth-brand"><span className="brand-mark"><Store size={22} /></span><span>Shop Billing setup</span></div><h1>Database setup needed</h1><p className="muted">The app could not load the shop database. Apply the included SQL migration in Supabase, then reload this page.</p><pre>{cloudError}</pre><button className="button button-outline" onClick={() => window.location.reload()}><RefreshCw size={16} /> Reload</button></div></div>;
 
   const pageTitle = navItems.find((item) => item.id === activeTab)?.label ?? 'Settings';
   const pageSubtitle: Record<Tab, string> = {
@@ -521,23 +554,34 @@ function App() {
   return <div className="app-shell">
     <aside className={`sidebar ${mobileMenu ? 'sidebar-open' : ''}`}>
       <div className="sidebar-brand"><span className="brand-mark"><ShoppingBag size={21} /></span><div><strong>Shop Billing</strong><small>Simple shop manager</small></div><button className="mobile-close icon-button" onClick={() => setMobileMenu(false)} aria-label="Close menu"><X size={18} /></button></div>
-      <div className="shop-switcher"><span className="shop-avatar"><Store size={17} /></span><span><strong>{state.shopName}</strong><small>{cloudMode ? 'Cloud synced' : 'This device'}</small></span><ChevronDown size={15} /></div>
+      <div className="shop-switcher"><span className="shop-avatar"><Store size={17} /></span><span><strong>{state.shopName}</strong><small>Cloud database</small></span><ChevronDown size={15} /></div>
       <nav className="side-nav" aria-label="Main navigation"><p className="nav-caption">MENU</p>{navItems.map(({ id: tabId, label, icon: Icon }) => <button key={tabId} className={`nav-link ${activeTab === tabId ? 'active' : ''}`} onClick={() => { setActiveTab(tabId); setMobileMenu(false); }}><Icon size={18} /><span>{label}</span>{tabId === 'bill' && <kbd>⌘ K</kbd>}</button>)}</nav>
       <div className="sidebar-bottom">
-        <div className={`mode-card ${cloudMode ? 'mode-cloud' : ''}`}><span className="status-dot" /><div><strong>{cloudMode ? 'Cloud connected' : 'Demo mode'}</strong><small>{cloudMode ? 'Saved to Supabase' : 'Saved on this device'}</small></div><Info size={14} /></div>
+        <div className="mode-card mode-cloud"><span className="status-dot" /><div><strong>Supabase connected</strong><small>Live shop records</small></div><Info size={14} /></div>
         <button className={`nav-link ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => { setActiveTab('settings'); setMobileMenu(false); }}><Settings size={18} /><span>Settings</span></button>
-        {session && <button className="nav-link signout-link" onClick={signOut}><LogOut size={18} /><span>Sign out</span></button>}
-        <div className="sidebar-footer"><span className="avatar-small">{(state.shopName || 'M').charAt(0).toUpperCase()}</span><span><strong>{session?.user.email ?? 'Shop owner'}</strong><small>{cloudMode ? 'Owner account' : 'Local demo account'}</small></span><ChevronRight size={15} /></div>
+        <button className="nav-link signout-link" onClick={signOut} aria-label="Sign out"><LogOut size={18} /><span>Sign out</span></button>
+        <div className="sidebar-footer"><span className="avatar-small">{(state.shopName || 'M').charAt(0).toUpperCase()}</span><span><strong>{session?.user.email ?? 'Shop owner'}</strong><small>Owner account</small></span><ChevronRight size={15} /></div>
       </div>
     </aside>
 
     <nav className="mobile-bottom-nav" aria-label="Mobile navigation">{navItems.map(({ id: tabId, label, icon: Icon }) => <button key={tabId} className={activeTab === tabId ? 'active' : ''} onClick={() => setActiveTab(tabId)}><Icon size={19} /><span>{label === 'Overview' ? 'Home' : label === 'New bill' ? 'Bill' : label === 'Sales history' ? 'Sales' : label}</span></button>)}<button className={activeTab === 'settings' ? 'active' : ''} onClick={() => setActiveTab('settings')}><Settings size={19} /><span>Settings</span></button></nav>
 
     <main className="main-area">
-      <header className="topbar"><div className="topbar-left"><button className="mobile-menu-button icon-button" onClick={() => setMobileMenu(true)} aria-label="Open menu"><Menu size={20} /></button><div><p className="eyebrow">{new Intl.DateTimeFormat('en-IN', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date())}</p><h1>{pageTitle}</h1></div></div><div className="topbar-right"><span className={`connection-pill ${cloudMode ? 'is-cloud' : ''}`}><span className="status-dot" />{cloudMode ? 'Synced' : 'Demo mode'}</span><button className="topbar-date" aria-label="Today"><CalendarDays size={16} /><span>Today</span></button><button className="button button-primary top-new-bill" onClick={() => setActiveTab('bill')}><Plus size={17} /> New bill</button></div></header>
+      <header className="topbar">
+        <div className="topbar-left">
+          <button className="mobile-menu-button icon-button" onClick={() => setMobileMenu(true)} aria-label="Open menu"><Menu size={20} /></button>
+          <div><p className="eyebrow">{new Intl.DateTimeFormat('en-IN', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date())}</p><h1>{pageTitle}</h1></div>
+        </div>
+        <div className="topbar-right">
+          <span className="connection-pill is-cloud"><span className="status-dot" />Live Synced</span>
+          <button className="topbar-date" aria-label="Today"><CalendarDays size={16} /><span>Today</span></button>
+          <button className="button button-outline topbar-signout" onClick={signOut} title="Sign out of shop"><LogOut size={15} /><span>Sign out</span></button>
+          <button className="button button-primary top-new-bill" onClick={() => setActiveTab('bill')}><Plus size={17} /> New bill</button>
+        </div>
+      </header>
       <section className="page-content">
-        <div className="page-intro"><p>{pageSubtitle[activeTab]}</p>{!isSupabaseConfigured && <span className="demo-note"><Info size={14} /> Demo data stays in this browser</span>}</div>
-        {cloudError && cloudMode && <div className="inline-warning"><AlertTriangle size={17} /><span>{cloudError}</span><button onClick={() => refreshCloud().catch((e) => setCloudError(e.message))}>Retry</button></div>}
+        <div className="page-intro"><p>{pageSubtitle[activeTab]}</p></div>
+        {cloudError && <div className="inline-warning"><AlertTriangle size={17} /><span>{cloudError}</span><button onClick={() => refreshCloud().catch((e) => setCloudError(e.message))}>Retry</button></div>}
 
         {activeTab === 'dashboard' && <>
           <div className="welcome-row"><div><h2>Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}, shop owner <span className="wave">✦</span></h2><p>Here’s what’s happening in your shop today.</p></div><button className="button button-primary" onClick={() => setActiveTab('bill')}><Plus size={17} /> Create a bill</button></div>
@@ -585,7 +629,7 @@ function App() {
                 {paymentMode === 'split' && <div className="split-fields"><label>Cash<input type="number" min="0" step="0.01" value={splitCash} onChange={(e) => setSplitCash(e.target.value)} placeholder="0.00" /></label><label>GPay / UPI<input type="number" min="0" step="0.01" value={splitUpi} onChange={(e) => setSplitUpi(e.target.value)} placeholder="0.00" /></label><small>Both amounts must add up to {money(cartQuote.total)}.</small></div>}
               </div>
               <button className="button button-primary complete-bill" onClick={completeBill} disabled={busy || cartQuote.total <= 0}>{busy ? <LoaderCircle className="spin" size={17} /> : <Check size={17} />} {busy ? 'Saving bill…' : 'Complete bill'}<strong>{money(cartQuote.total)}</strong></button>
-              <p className="secure-note"><span className="secure-dot" /> {cloudMode ? 'Bill is saved securely to your shop database.' : 'Demo bills are saved in this browser only.'}</p>
+              <p className="secure-note"><span className="secure-dot" /> Bill is saved directly to your Supabase shop database.</p>
             </>}
           </section>
         </div>}
@@ -623,11 +667,13 @@ function App() {
 
         {activeTab === 'settings' && <div className="settings-layout"><section className="panel settings-panel"><div className="panel-heading"><div><h3>Shop settings</h3><p>Personalize your receipts and account</p></div><span className="settings-icon"><Settings size={19} /></span></div>
           <form onSubmit={updateShopName} className="settings-form"><label>Shop name<input value={shopNameInput} onChange={(e) => setShopNameInput(e.target.value)} placeholder="My Shop" /></label><p className="field-help">This name appears at the top of every receipt.</p><button className="button button-primary" disabled={savingName}>{savingName ? 'Saving…' : 'Save shop name'}</button></form>
-          <div className="settings-divider" /><div className="setting-row"><span className="setting-icon"><Store size={18} /></span><span><strong>Storage</strong><small>{cloudMode ? 'Your records are stored in Supabase.' : 'Demo records are stored in this browser only.'}</small></span><span className={`status-chip ${cloudMode ? 'success' : 'warning'}`}><i />{cloudMode ? 'Cloud' : 'Demo'}</span></div>
+          <div className="settings-divider" /><div className="setting-row"><span className="setting-icon"><Store size={18} /></span><span><strong>Database storage</strong><small>Live records are stored in Supabase PostgreSQL.</small></span><span className="status-chip success"><i />Connected</span></div>
           <div className="setting-row"><span className="setting-icon"><CreditCard size={18} /></span><span><strong>Payment methods</strong><small>Cash and manual GPay / UPI recording.</small></span><span className="setting-value">Enabled</span></div>
           <div className="setting-row"><span className="setting-icon"><FileText size={18} /></span><span><strong>Receipt number format</strong><small>Date followed by a daily sequence.</small></span><span className="setting-value">YYYYMMDD-0001</span></div>
-          {!isSupabaseConfigured && <div className="setup-card"><div className="setup-card-icon"><Info size={19} /></div><div><strong>Connect Supabase for cloud storage</strong><p>Add <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> to the app’s environment, then apply <code>001_shop_billing.sql</code> and <code>002_customers.sql</code>. Until then, this device runs in demo mode.</p><a href="https://supabase.com/dashboard" target="_blank" rel="noreferrer">Open Supabase <ArrowUpRight size={14} /></a></div></div>}
-        </section><section className="panel settings-side"><div className="panel-heading"><div><h3>About this app</h3><p>Shop Billing</p></div><span className="about-mark"><ShoppingBag size={20} /></span></div><p className="about-copy">A simple billing and stock tracker built for daily shop work. Created by Shiyas Ahmad. WhatsApp 7012587705 for support.</p><div className="about-stat"><span>Currency</span><strong>Indian Rupee · ₹</strong></div><div className="about-stat"><span>Product types</span><strong>Kg and Piece</strong></div><div className="about-stat"><span>Mobile app</span><strong>Installable PWA</strong></div><div className="about-stat"><span>Version</span><strong>1.0.0</strong></div>{session && <button className="button button-outline signout-button" onClick={signOut}><LogOut size={16} /> Sign out</button>}</section></div>}
+          <div className="settings-divider" />
+          <div className="setting-row"><span className="setting-icon"><Users size={18} /></span><span><strong>Owner account</strong><small>{session?.user.email ?? 'Shop owner'}</small></span><button className="button button-outline button-danger" onClick={signOut}><LogOut size={15} /> Sign out</button></div>
+          <div className="setting-row"><span className="setting-icon"><Settings size={18} /></span><span><strong>Supabase credentials</strong><small>Change API key or reconnect.</small></span><button className="button button-outline button-sm" onClick={() => { clearSupabaseConfig(); window.location.reload(); }}>Reset API key</button></div>
+        </section><section className="panel settings-side"><div className="panel-heading"><div><h3>About this app</h3><p>Shop Billing</p></div><span className="about-mark"><ShoppingBag size={20} /></span></div><p className="about-copy">A simple billing and stock tracker built for daily shop work. Created by Shiyas Ahmad. WhatsApp 7012587705 for support.</p><div className="about-stat"><span>Currency</span><strong>Indian Rupee · ₹</strong></div><div className="about-stat"><span>Product types</span><strong>Kg and Piece</strong></div><div className="about-stat"><span>Mobile app</span><strong>Installable PWA</strong></div><div className="about-stat"><span>Version</span><strong>1.0.0</strong></div><button className="button button-outline signout-button button-danger" onClick={signOut} style={{ width: '100%', marginTop: '16px' }}><LogOut size={16} /> Sign out of shop</button></section></div>}
 
         <footer className="page-footer"><span>Shop Billing <span>·</span> Simple daily shop management</span><span>Created by <strong>Shiyas Ahmad</strong> <span>·</span> <a href="https://wa.me/917012587705" target="_blank" rel="noreferrer">WhatsApp 7012587705</a></span></footer>
       </section>

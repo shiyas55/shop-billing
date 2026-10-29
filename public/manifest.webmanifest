@@ -1,0 +1,12 @@
+{
+  "name": "Shop Billing",
+  "short_name": "Shop Billing",
+  "description": "Simple billing, stock, and expense tracking for a small shop.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f8f5",
+  "theme_color": "#f7f8f5",
+  "icons": [
+    { "src": "/shop-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

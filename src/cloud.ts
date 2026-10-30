@@ -129,6 +129,11 @@ export async function saveCloudExpense(shopId: string, input: { category: string
   if (error) throw error;
 }
 
+export async function voidCloudSale(saleId: string) {
+  const { error } = await requiredClient().from('sales').update({ status: 'void' }).eq('id', saleId);
+  if (error) throw error;
+}
+
 export async function saveCloudSale(shopId: string, input: {
   customerName: string; customerPhone: string; billDiscount: number; cart: { productId: string; quantity: number; unit: 'g' | 'kg' | 'piece' }[];
   cashAmount: number; upiAmount: number;

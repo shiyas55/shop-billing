@@ -50,3 +50,4 @@ export function clearCache(): void {
     localStorage.removeItem(SHOP_KEY);
   } catch { /* ignore */ }
 }
+

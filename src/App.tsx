@@ -7,7 +7,7 @@ import {
   Calculator, Scale, Search, Settings, Share2, ShoppingBag, Smartphone, Sparkles, Store, Trash2, Users, WalletCards, X,
 } from 'lucide-react';
 import type { CartLine, Expense, Product, ProductInput, Sale, ShopState } from './types';
-import { archiveCloudProduct, createOwnedShop, getOwnedShop, loadCloudState, receiveCloudStock, renameOwnedShop, saveCloudExpense, saveCloudProduct, saveCloudSale } from './cloud';
+import { archiveCloudProduct, createOwnedShop, getOwnedShop, loadCloudState, receiveCloudStock, renameOwnedShop, saveCloudExpense, saveCloudProduct, saveCloudSale, voidCloudSale } from './cloud';
 import { clearSupabaseConfig, isSupabaseConfigured, saveSupabaseConfig, supabase } from './supabase';
 import { clearCache, readCachedShop, readCachedState, writeCachedShop, writeCachedState } from './cache';
 
@@ -263,16 +263,30 @@ function StockForm({ product, onClose, onSave }: { product: Product; onClose: ()
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const amount = Number(quantity || 0) * Number(unitCost || 0);
-  const submit = async (event: FormEvent) => { event.preventDefault(); setError(''); setBusy(true); try { await onSave({ quantity: Number(quantity), unitCost: Number(unitCost), method, note }); onClose(); } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not add stock.'); } finally { setBusy(false); } };
+  const costNum = Number(unitCost || 0);
+  const priceDiff = costNum - product.purchasePrice;
+  const priceDiffPct = product.purchasePrice > 0 ? (priceDiff / product.purchasePrice) * 100 : 0;
+  const submit = async (event: FormEvent) => {
+    event.preventDefault(); setError(''); setBusy(true);
+    try { await onSave({ quantity: Number(quantity), unitCost: costNum, method, note }); onClose(); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not add stock.'); }
+    finally { setBusy(false); }
+  };
   return <Overlay onClose={onClose}>
     <div className="modal-head"><div><p className="eyebrow">INVENTORY IN</p><h2>Add stock</h2></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={19} /></button></div>
-    <div className="selected-product"><span className="product-avatar">{product.category === 'kg' ? <Scale size={17} /> : <Package size={17} />}</span><div><strong>{product.name}</strong><small>Current stock: {stockLabel(product)} {safeProductQuantity(product)}</small></div></div>
+    <div className="selected-product"><span className="product-avatar">{product.category === 'kg' ? <Scale size={17} /> : <Package size={17} />}</span><div><strong>{product.name}</strong><small>Current stock: {stockLabel(product)} {safeProductQuantity(product)} · Last buy rate: {money(product.purchasePrice)}</small></div></div>
     <form className="form-stack" onSubmit={submit}>
       <label>Quantity received ({product.category === 'kg' ? 'kg' : 'pieces'})<input type="number" min="0.000001" step={product.category === 'kg' ? '0.0001' : '1'} required value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder={product.category === 'kg' ? 'e.g. 100' : 'e.g. 24'} /></label>
-      <label>Purchase cost per {product.category === 'kg' ? 'kg' : 'piece'}<span className="input-prefix"><b>₹</b><input type="number" min="0" step="0.01" required value={unitCost} onChange={(e) => setUnitCost(e.target.value)} /></span></label>
+      <label>Purchase cost per {product.category === 'kg' ? 'kg' : 'piece'}<span className="input-prefix"><b>₹</b><input type="number" min="0" step="0.01" required value={unitCost} onChange={(e) => setUnitCost(e.target.value)} /></span>
+        {unitCost !== '' && costNum !== product.purchasePrice && (
+          <small className={priceDiff > 0 ? 'rate-up' : 'rate-down'}>
+            {priceDiff > 0 ? '▲' : '▼'} Rate {priceDiff > 0 ? 'increased' : 'decreased'} by {money(Math.abs(priceDiff))} ({Math.abs(priceDiffPct).toFixed(1)}%) from last purchase · Product buy cost will update
+          </small>
+        )}
+      </label>
       <label>Paid using<select value={method} onChange={(e) => setMethod(e.target.value as 'cash' | 'upi')}><option value="cash">Cash</option><option value="upi">GPay / UPI</option></select></label>
       <label>Note<input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional note" /></label>
-      <div className="stock-cost-preview"><span>Stock purchase value</span><strong>{money(amount)}</strong></div>
+      <div className="stock-cost-preview"><span>Total stock value</span><strong>{money(amount)}</strong></div>
       {error && <p className="form-error">{error}</p>}
       <div className="modal-foot"><button type="button" className="button button-outline" onClick={onClose}>Cancel</button><button className="button button-primary" disabled={busy}>{busy ? 'Saving…' : 'Add stock'}</button></div>
     </form>

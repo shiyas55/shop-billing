@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import {
   AlertTriangle, ArrowDownRight, ArrowRight, ArrowUpRight, Banknote, Boxes, CalendarDays,
@@ -342,6 +342,9 @@ function App() {
   const [shopNameInput, setShopNameInput] = useState('My Shop');
   const [savingName, setSavingName] = useState(false);
   const [mobileMenu, setMobileMenu] = useState(false);
+  // Ref-based lock to prevent duplicate bill submission on slow networks
+  // (useRef updates synchronously, unlike setState which batches)
+  const billSubmitting = useRef(false);
 
   const activeProducts = useMemo(() => state.products.filter((product) => product.active), [state.products]);
   const customerStats = useMemo(() => {
@@ -529,12 +532,15 @@ function App() {
   }, [cart, activeProducts, billDiscount]);
 
   const completeBill = async () => {
+    // Synchronous guard — blocks any further taps before React re-renders
+    if (billSubmitting.current) return;
     if (!cart.length || cartQuote.total <= 0) { setNotice({ type: 'error', text: 'Add a product and enter a valid quantity first.' }); return; }
     if (Number(billDiscount) < 0 || Number(billDiscount) > cartQuote.beforeBillDiscount) { setNotice({ type: 'error', text: 'Discount cannot exceed the bill amount.' }); return; }
     if (customerPhone.trim() && (normalizedPhone(customerPhone).length < 6 || normalizedPhone(customerPhone).length > 15)) { setNotice({ type: 'error', text: 'Enter a valid WhatsApp number with 6–15 digits.' }); return; }
     const cash = paymentMode === 'cash' ? cartQuote.total : paymentMode === 'split' ? roundMoney(Number(splitCash) || 0) : 0;
     const upi = paymentMode === 'upi' ? cartQuote.total : paymentMode === 'split' ? roundMoney(Number(splitUpi) || 0) : 0;
     if (roundMoney(cash + upi) !== cartQuote.total) { setNotice({ type: 'error', text: `Cash and GPay must add up to ${money(cartQuote.total)}.` }); return; }
+    billSubmitting.current = true;
     setBusy(true);
     try {
       if (!cloudShop) throw new Error('Shop database not loaded.');
@@ -546,7 +552,7 @@ function App() {
       setCart([]); setCustomerName(''); setCustomerPhone(''); setBillDiscount('0'); setSplitCash(''); setSplitUpi('');
       setNotice({ type: 'success', text: 'Bill saved successfully.' });
     } catch (error) { setNotice({ type: 'error', text: error instanceof Error ? error.message : 'Could not save bill.' }); }
-    finally { setBusy(false); }
+    finally { setBusy(false); billSubmitting.current = false; }
   };
 
   const updateShopName = async (event: FormEvent) => {

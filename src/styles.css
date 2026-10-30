@@ -545,6 +545,43 @@ tbody td:first-child, thead th:first-child { padding-left: 2px; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ── Skeleton loading screen ── */
+@keyframes shimmer {
+  0%   { background-position: -600px 0; }
+  100% { background-position:  600px 0; }
+}
+.skel {
+  border-radius: 7px;
+  background: linear-gradient(90deg, #e8ece8 25%, #f4f6f4 50%, #e8ece8 75%);
+  background-size: 600px 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+.skeleton-shell { min-height: 100vh; display: flex; background: #f5f7f4; }
+.skeleton-sidebar { width: 252px; flex: 0 0 252px; padding: 22px 15px; background: #19392e; display: flex; flex-direction: column; gap: 10px; }
+.skeleton-brand { display: flex; align-items: center; gap: 11px; margin-bottom: 16px; }
+.skel-icon { width: 38px; height: 38px; flex: 0 0 38px; border-radius: 12px; background: rgba(255,255,255,.12); animation: none; }
+.skel-text-lg { height: 13px; width: 110px; border-radius: 5px; background: rgba(255,255,255,.12); animation: none; }
+.skel-text-sm { height: 10px; width: 80px; border-radius: 4px; background: rgba(255,255,255,.08); animation: none; }
+.skel-nav-item { height: 38px; width: 100%; border-radius: 9px; background: rgba(255,255,255,.07); animation: none; }
+.skeleton-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.skeleton-topbar { min-height: 82px; display: flex; align-items: center; justify-content: space-between; padding: 16px clamp(22px,4vw,55px); border-bottom: 1px solid #e9ede9; background: rgba(255,255,255,.84); }
+.skeleton-content { padding: 22px clamp(22px,4vw,55px) 18px; display: flex; flex-direction: column; gap: 12px; }
+.skeleton-metrics { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; }
+.skel-metric-card { height: 116px; border-radius: 12px; }
+.skeleton-panels { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; }
+.skel-panel-tall { height: 310px; border-radius: 12px; }
+.skel-panel-short { height: 130px; border-radius: 12px; }
+.skeleton-label { display: flex; align-items: center; gap: 8px; margin: 8px clamp(22px,4vw,55px); color: #8a9990; font-size: 11px; }
+
+@media (max-width: 860px) {
+  .skeleton-sidebar { display: none; }
+}
+@media (max-width: 680px) {
+  .skeleton-metrics { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .skeleton-panels { grid-template-columns: 1fr; }
+  .skel-panel-tall { height: 200px; }
+}
+
 @media (max-width: 1120px) {
   .sidebar { width: 220px; }
   .main-area { margin-left: 220px; }

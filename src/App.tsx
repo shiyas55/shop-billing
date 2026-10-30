@@ -9,6 +9,7 @@ import {
 import type { CartLine, Expense, Product, ProductInput, Sale, ShopState } from './types';
 import { archiveCloudProduct, createOwnedShop, getOwnedShop, loadCloudState, receiveCloudStock, renameOwnedShop, saveCloudExpense, saveCloudProduct, saveCloudSale } from './cloud';
 import { clearSupabaseConfig, isSupabaseConfigured, saveSupabaseConfig, supabase } from './supabase';
+import { clearCache, readCachedShop, readCachedState, writeCachedShop, writeCachedState } from './cache';
 
 const money = (value: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number.isFinite(value) ? value : 0);
 const roundMoney = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
@@ -131,6 +132,32 @@ function AuthScreen({ onLogin, onSignUp, onResetKey }: { onLogin: (email: string
       <button type="button" className="text-button" style={{ fontSize: '10px', color: '#88988e' }} onClick={onResetKey}>Change Supabase API key</button>
     </div>
   </div></main>;
+}
+
+function SkeletonScreen({ label }: { label: string }) {
+  return (
+    <main className="skeleton-shell">
+      <div className="skeleton-sidebar">
+        <div className="skeleton-brand">
+          <div className="skel skel-icon" />
+          <div><div className="skel skel-text-lg" /><div className="skel skel-text-sm" style={{ marginTop: 6 }} /></div>
+        </div>
+        {[1,2,3,4,5,6].map((i) => <div key={i} className="skel skel-nav-item" style={{ opacity: 1 - i * 0.11 }} />)}
+      </div>
+      <div className="skeleton-main">
+        <div className="skeleton-topbar">
+          <div><div className="skel skel-text-sm" style={{ width: 90 }} /><div className="skel skel-text-lg" style={{ width: 140, marginTop: 6 }} /></div>
+          <div style={{ display: 'flex', gap: 8 }}><div className="skel" style={{ width: 80, height: 34, borderRadius: 8 }} /><div className="skel" style={{ width: 80, height: 34, borderRadius: 8 }} /></div>
+        </div>
+        <div className="skeleton-content">
+          <div className="skeleton-metrics">{[1,2,3,4].map((i) => <div key={i} className="skel skel-metric-card" />)}</div>
+          <div className="skeleton-panels"><div className="skel skel-panel-tall" /><div className="skel skel-panel-tall" /></div>
+          <div className="skel skel-panel-short" />
+        </div>
+        <div className="skeleton-label"><LoaderCircle className="spin" size={15} />{label}</div>
+      </div>
+    </main>
+  );
 }
 
 function SetupShopScreen({ onCreate, error }: { onCreate: (name: string) => Promise<void>; error: string }) {
@@ -310,12 +337,14 @@ function ExpenseForm({ onClose, onSave }: { onClose: () => void; onSave: (input:
 }
 
 function App() {
-  const [state, setState] = useState<ShopState>(emptyState);
+  const [state, setState] = useState<ShopState>(() => readCachedState() ?? emptyState);
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [session, setSession] = useState<Session | null>(null);
   const [sessionChecked, setSessionChecked] = useState(false);
-  const [cloudShop, setCloudShop] = useState<{ id: string; name: string } | null>(null);
-  const [cloudReady, setCloudReady] = useState(false);
+  const [cloudShop, setCloudShop] = useState<{ id: string; name: string } | null>(() => readCachedShop());
+  // If we already have cached state + shop, show the app immediately (stale-while-revalidate)
+  const hasCachedData = useRef(readCachedState() !== null && readCachedShop() !== null).current;
+  const [cloudReady, setCloudReady] = useState(hasCachedData);
   const [cloudError, setCloudError] = useState('');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
@@ -375,6 +404,8 @@ function App() {
     });
     const { data: auth } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession); setCloudShop(null); setCloudReady(false); setCloudError('');
+      // Clear cache on sign-out so stale data isn't shown on next login
+      if (!nextSession) clearCache();
     });
     return () => { alive = false; auth.subscription.unsubscribe(); };
   }, []);
@@ -382,15 +413,27 @@ function App() {
   useEffect(() => {
     if (!supabase || !session) return;
     let alive = true;
-    setCloudReady(false); setCloudError('');
+    // Only block UI with spinner if there's nothing cached to show
+    if (!hasCachedData) setCloudReady(false);
+    setCloudError('');
     (async () => {
       try {
-        const shop = await getOwnedShop();
+        // Skip getOwnedShop round-trip if we already know the shop from cache
+        const cachedShop = readCachedShop();
+        const shop = cachedShop ?? await getOwnedShop();
         if (!alive) return;
-        setCloudShop(shop);
         if (shop) {
+          setCloudShop(shop);
+          writeCachedShop(shop);
+          // Always fetch fresh data, but silently (app is already visible with cached data)
           const cloudState = await loadCloudState(shop.id, shop.name);
-          if (alive) { setState(cloudState); setShopNameInput(shop.name); }
+          if (alive) {
+            setState(cloudState);
+            setShopNameInput(shop.name);
+            writeCachedState(cloudState); // update cache for next open
+          }
+        } else {
+          setCloudShop(null);
         }
       } catch (error) { if (alive) setCloudError(error instanceof Error ? error.message : 'Could not load the shop database.'); }
       finally { if (alive) setCloudReady(true); }
@@ -408,6 +451,7 @@ function App() {
     if (!shop) return;
     const next = await loadCloudState(shop.id, shop.name);
     setState(next);
+    writeCachedState(next);
     setShopNameInput(next.shopName);
   };
 
@@ -570,6 +614,7 @@ function App() {
 
   const signOut = async () => {
     if (supabase) await supabase.auth.signOut();
+    clearCache();
     setSession(null);
     setCloudShop(null);
     setState(emptyState);
@@ -577,9 +622,11 @@ function App() {
   };
 
   if (!isSupabaseConfigured) return <ConnectSupabaseScreen onConnect={(url, key) => { saveSupabaseConfig(key, url); window.location.reload(); }} />;
-  if (!sessionChecked) return <main className="loading-screen"><LoaderCircle className="spin" size={28} /><span>Checking sign-in…</span></main>;
+  // Fast path: if we have cached session data, show auth check as instant
+  if (!sessionChecked && !hasCachedData) return <SkeletonScreen label="Checking sign-in…" />;
   if (!session) return <AuthScreen onLogin={login} onSignUp={signup} onResetKey={() => { clearSupabaseConfig(); window.location.reload(); }} />;
-  if (session && !cloudReady) return <main className="loading-screen"><LoaderCircle className="spin" size={28} /><span>Loading shop database…</span></main>;
+  // With cached data we skip the loading screen entirely (background refresh happens silently)
+  if (session && !cloudReady && !hasCachedData) return <SkeletonScreen label="Loading your shop…" />;
   if (session && !cloudShop && !cloudError) return <SetupShopScreen onCreate={createShop} error="" />;
   if (session && !cloudShop && cloudError) return <div className="setup-error"><div className="auth-card"><div className="auth-brand"><span className="brand-mark"><Store size={22} /></span><span>Shop Billing setup</span></div><h1>Database setup needed</h1><p className="muted">The app could not load the shop database. Apply the included SQL migration in Supabase, then reload this page.</p><pre>{cloudError}</pre><button className="button button-outline" onClick={() => window.location.reload()}><RefreshCw size={16} /> Reload</button></div></div>;
 

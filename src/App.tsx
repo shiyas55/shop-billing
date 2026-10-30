@@ -181,16 +181,23 @@ function ProductForm({ product, onClose, onSave }: { product?: Product | null; o
   const [retail, setRetail] = useState(String(product?.retailPrice ?? ''));
   const [selling, setSelling] = useState(String(product?.sellingPrice ?? 0));
   const [discount, setDiscount] = useState(String(product?.discountPercent ?? 0));
-  const [stock, setStock] = useState('0');
-  const [lowStock, setLowStock] = useState(String(product?.lowStockAt ?? 0));
+  const [stock, setStock] = useState('');
+  const [lowStock, setLowStock] = useState(product?.lowStockAt != null && product.lowStockAt > 0 ? String(product.lowStockAt) : '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setError('');
-    if (category === 'piece' && (!Number.isInteger(Number(stock)) || !Number.isInteger(Number(lowStock)))) { setError('Piece stock and low-stock alert must be whole numbers.'); return; }
+    // Piece products: validate integers only if values are provided
+    if (category === 'piece') {
+      if (stock !== '' && !Number.isInteger(Number(stock))) { setError('Piece opening stock must be a whole number.'); return; }
+      if (lowStock !== '' && !Number.isInteger(Number(lowStock))) { setError('Piece low-stock alert must be a whole number.'); return; }
+    }
     if (Number(discount) < 0 || Number(discount) > 100) { setError('Discount must be between 0% and 100%.'); return; }
     setBusy(true);
-    try { await onSave({ name: name.trim(), category, purchasePrice: Number(purchase), retailPrice: retail === '' ? null : Number(retail), sellingPrice: Number(selling), discountPercent: Number(discount), stockQuantity: product ? product.stockQuantity : Number(stock), lowStockAt: Number(lowStock) }); onClose(); }
+    // Convert empty strings to 0 / null safely
+    const openingStock = stock === '' ? 0 : Number(stock);
+    const lowStockAt = lowStock === '' ? 0 : Number(lowStock);
+    try { await onSave({ name: name.trim(), category, purchasePrice: Number(purchase), retailPrice: retail === '' ? null : Number(retail), sellingPrice: Number(selling), discountPercent: Number(discount), stockQuantity: product ? product.stockQuantity : openingStock, lowStockAt }); onClose(); }
     catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not save product.'); }
     finally { setBusy(false); }
   };
@@ -212,8 +219,8 @@ function ProductForm({ product, onClose, onSave }: { product?: Product | null; o
         <label>Product discount <span className="input-suffix"><input type="number" min="0" max="100" step="0.1" value={discount} onChange={(e) => setDiscount(e.target.value)} /><b>%</b></span><small>Optional. Applied automatically to bills.</small></label>
       </div>
       <div className="form-grid two-col">
-        {!product && <label>Opening stock <input type="number" min="0" step={category === 'kg' ? '0.0001' : '1'} value={stock} onChange={(e) => setStock(e.target.value)} /><small>{category === 'kg' ? 'Enter a bulk weight, for example 100 kg.' : 'Enter the number of pieces.'}</small></label>}
-        <label>Low-stock alert <input type="number" min="0" step={category === 'kg' ? '0.0001' : '1'} value={lowStock} onChange={(e) => setLowStock(e.target.value)} /><small>{category === 'kg' ? 'Alert below this many kg.' : 'Alert below this many pieces.'}</small></label>
+        {!product && <label>Opening stock <span className="optional">Optional</span><input type="number" min="0" step={category === 'kg' ? '0.0001' : '1'} value={stock} onChange={(e) => setStock(e.target.value)} placeholder={category === 'kg' ? 'e.g. 50 kg' : 'e.g. 100'} /><small>{category === 'kg' ? 'Leave blank to add stock later.' : 'Leave blank to add stock later.'}</small></label>}
+        <label>Low-stock alert <span className="optional">Optional</span><input type="number" min="0" step={category === 'kg' ? '0.0001' : '1'} value={lowStock} onChange={(e) => setLowStock(e.target.value)} placeholder={category === 'kg' ? 'e.g. 5 kg' : 'e.g. 10'} /><small>{category === 'kg' ? 'Warn when stock drops below this kg.' : 'Warn when stock drops below this count.'}</small></label>
       </div>
       {error && <p className="form-error">{error}</p>}
       <div className="modal-foot"><button type="button" className="button button-outline" onClick={onClose}>Cancel</button><button className="button button-primary" disabled={busy}>{busy ? 'Saving…' : product ? 'Save changes' : 'Add product'}</button></div>

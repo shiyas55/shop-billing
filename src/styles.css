@@ -410,6 +410,7 @@ tbody td:first-child, thead th:first-child { padding-left: 2px; }
   max-height: calc(100dvh - 48px) !important;
   margin: auto !important;
   overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch !important;
   padding: 24px !important;
   border: 1px solid rgba(255, 255, 255, 0.85) !important;
   border-radius: 18px !important;

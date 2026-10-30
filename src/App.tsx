@@ -20,8 +20,7 @@ const dateLabel = (value: string) => new Intl.DateTimeFormat('en-IN', { day: 'nu
 const timeLabel = (value: string) => new Intl.DateTimeFormat('en-IN', { hour: 'numeric', minute: '2-digit' }).format(new Date(value));
 const normalizedPhone = (value: string) => value.replace(/\D/g, '');
 const safeProductQuantity = (product?: Product) => product?.category === 'kg' ? 'kg' : 'pcs';
-const isUntrackedKg = (product: Product) => product.category === 'kg' && (product.stockQuantity >= 900000 || product.stockQuantity <= 0);
-const stockLabel = (product: Product) => isUntrackedKg(product) ? 'Open' : product.stockQuantity.toLocaleString('en-IN', { maximumFractionDigits: product.category === 'kg' ? 3 : 0 });
+const stockLabel = (product: Product) => product.stockQuantity.toLocaleString('en-IN', { maximumFractionDigits: product.category === 'kg' ? 6 : 0 });
 
 type Tab = 'dashboard' | 'bill' | 'products' | 'customers' | 'expenses' | 'sales' | 'settings';
 type Notice = { type: 'success' | 'error' | 'info'; text: string } | null;
@@ -182,49 +181,28 @@ function ProductForm({ product, onClose, onSave }: { product?: Product | null; o
   const [retail, setRetail] = useState(String(product?.retailPrice ?? ''));
   const [selling, setSelling] = useState(String(product?.sellingPrice ?? 0));
   const [discount, setDiscount] = useState(String(product?.discountPercent ?? 0));
-  const [stock, setStock] = useState(product ? (product.stockQuantity >= 900000 ? '' : String(product.stockQuantity)) : '');
-  const [lowStock, setLowStock] = useState(product ? (product.lowStockAt <= 0 ? '' : String(product.lowStockAt)) : '');
+  const [stock, setStock] = useState('0');
+  const [lowStock, setLowStock] = useState(String(product?.lowStockAt ?? 0));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setError('');
-    const rawStock = stock.trim();
-    const rawLowStock = lowStock.trim();
-    if (category === 'piece' && rawStock && !Number.isInteger(Number(rawStock))) { setError('Piece stock must be a whole number.'); return; }
-    if (category === 'piece' && rawLowStock && !Number.isInteger(Number(rawLowStock))) { setError('Low-stock alert must be a whole number.'); return; }
+    if (category === 'piece' && (!Number.isInteger(Number(stock)) || !Number.isInteger(Number(lowStock)))) { setError('Piece stock and low-stock alert must be whole numbers.'); return; }
     if (Number(discount) < 0 || Number(discount) > 100) { setError('Discount must be between 0% and 100%.'); return; }
-
-    const parsedStock = rawStock === '' ? (category === 'kg' ? 999999 : 0) : Math.max(0, Number(rawStock));
-    const parsedLowStock = rawLowStock === '' ? 0 : Math.max(0, Number(rawLowStock));
-
     setBusy(true);
-    try {
-      await onSave({
-        name: name.trim(),
-        category,
-        purchasePrice: Math.max(0, Number(purchase)),
-        retailPrice: retail === '' ? null : Math.max(0, Number(retail)),
-        sellingPrice: Math.max(0, Number(selling)),
-        discountPercent: Number(discount),
-        stockQuantity: product ? (rawStock === '' ? product.stockQuantity : parsedStock) : parsedStock,
-        lowStockAt: parsedLowStock,
-      });
-      onClose();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Could not save product.');
-    } finally {
-      setBusy(false);
-    }
+    try { await onSave({ name: name.trim(), category, purchasePrice: Number(purchase), retailPrice: retail === '' ? null : Number(retail), sellingPrice: Number(selling), discountPercent: Number(discount), stockQuantity: product ? product.stockQuantity : Number(stock), lowStockAt: Number(lowStock) }); onClose(); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not save product.'); }
+    finally { setBusy(false); }
   };
   return <Overlay onClose={onClose}>
     <div className="modal-head"><div><p className="eyebrow">PRODUCT DETAILS</p><h2>{product ? 'Edit product' : 'Add product'}</h2></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={19} /></button></div>
     <form className="form-stack" onSubmit={submit}>
-      <label>Product name<input autoFocus required value={name} onChange={(e) => setName(e.target.value)} placeholder="For example, Tomatoes, Rice, Sugar..." /></label>
+      <label>Product name<input autoFocus required value={name} onChange={(e) => setName(e.target.value)} placeholder="For example, sample loose product" /></label>
       <div className="field-label">Sale type</div><div className="segmented type-selector">
         <button type="button" className={category === 'kg' ? 'selected' : ''} onClick={() => setCategory('kg')}><Scale size={16} /> Kg product</button>
         <button type="button" className={category === 'piece' ? 'selected' : ''} onClick={() => setCategory('piece')}><Boxes size={16} /> Piece product</button>
       </div>
-      <p className="field-help">{category === 'kg' ? 'Price is per kilogram. Customers can be billed in grams or kilograms. Stock tracking is optional.' : 'Price is per item. Piece quantities are whole numbers.'}</p>
+      <p className="field-help">{category === 'kg' ? 'Price and stock are per kilogram. Customers can be billed in grams or kilograms.' : 'Price and stock are per item. Piece quantities are whole numbers.'}</p>
       <div className="form-grid two-col">
         <label>Purchase cost <span className="input-prefix"><b>₹</b><input type="number" min="0" step="0.01" required value={purchase} onChange={(e) => setPurchase(e.target.value)} /></span><small>per {category === 'kg' ? 'kg' : 'piece'}</small></label>
         <label>Retail price <span className="input-prefix"><b>₹</b><input type="number" min="0" step="0.01" value={retail} onChange={(e) => setRetail(e.target.value)} placeholder="Optional" /></span><small>per {category === 'kg' ? 'kg' : 'piece'}</small></label>
@@ -234,8 +212,8 @@ function ProductForm({ product, onClose, onSave }: { product?: Product | null; o
         <label>Product discount <span className="input-suffix"><input type="number" min="0" max="100" step="0.1" value={discount} onChange={(e) => setDiscount(e.target.value)} /><b>%</b></span><small>Optional. Applied automatically to bills.</small></label>
       </div>
       <div className="form-grid two-col">
-        {!product && <label>{category === 'kg' ? 'Opening stock (Total kg)' : 'Opening stock'} <span className="optional">Optional</span><input type="number" min="0" step={category === 'kg' ? '0.0001' : '1'} value={stock} onChange={(e) => setStock(e.target.value)} placeholder={category === 'kg' ? 'Optional (leave blank for open weight)' : 'Optional'} /><small>{category === 'kg' ? 'Optional for Kg products. Leave blank if you sell loose without tracking bulk stock.' : 'Current pieces in stock.'}</small></label>}
-        <label>Low-stock alert <span className="optional">Optional</span><input type="number" min="0" step={category === 'kg' ? '0.0001' : '1'} value={lowStock} onChange={(e) => setLowStock(e.target.value)} placeholder="Optional" /><small>{category === 'kg' ? 'Alert below this many kg (optional).' : 'Alert below this many pieces (optional).'}</small></label>
+        {!product && <label>Opening stock <input type="number" min="0" step={category === 'kg' ? '0.0001' : '1'} value={stock} onChange={(e) => setStock(e.target.value)} /><small>{category === 'kg' ? 'Enter a bulk weight, for example 100 kg.' : 'Enter the number of pieces.'}</small></label>}
+        <label>Low-stock alert <input type="number" min="0" step={category === 'kg' ? '0.0001' : '1'} value={lowStock} onChange={(e) => setLowStock(e.target.value)} /><small>{category === 'kg' ? 'Alert below this many kg.' : 'Alert below this many pieces.'}</small></label>
       </div>
       {error && <p className="form-error">{error}</p>}
       <div className="modal-foot"><button type="button" className="button button-outline" onClick={onClose}>Cancel</button><button className="button button-primary" disabled={busy}>{busy ? 'Saving…' : product ? 'Save changes' : 'Add product'}</button></div>
@@ -662,7 +640,7 @@ function App() {
             </section>
           </div>
           <section className="panel inventory-panel"><div className="panel-heading"><div><h3>Inventory at a glance</h3><p>Stock that may need attention</p></div><button className="text-button" onClick={() => setActiveTab('products')}>Manage products <ArrowRight size={15} /></button></div>
-            {activeProducts.length ? <div className="inventory-list">{activeProducts.slice(0, 5).map((product) => { const low = product.category === 'piece' ? product.stockQuantity <= product.lowStockAt : (!isUntrackedKg(product) && product.lowStockAt > 0 && product.stockQuantity <= product.lowStockAt); return <div className="inventory-row" key={product.id}><span className={`product-avatar ${low ? 'avatar-warning' : ''}`}>{product.category === 'kg' ? <Scale size={17} /> : <Package size={17} />}</span><span className="inventory-name"><strong>{product.name}</strong><small>{product.category === 'kg' ? 'Per kilogram' : 'Per piece'}</small></span><span className={`stock-value ${low ? 'stock-low' : ''}`}>{isUntrackedKg(product) ? 'Open' : stockLabel(product)} <small>{isUntrackedKg(product) ? '' : safeProductQuantity(product)}</small></span><span className={`stock-status ${low ? 'low' : ''}`}>{low ? 'Low stock' : isUntrackedKg(product) ? 'Open' : 'In stock'}</span></div>; })}</div> : <EmptyState title="No products yet" message="Add your products to start billing." action={<button className="button button-outline button-sm" onClick={() => { setEditingProduct(null); setModal('product'); }}>Add product</button>} />}
+            {activeProducts.length ? <div className="inventory-list">{activeProducts.slice(0, 5).map((product) => { const low = product.stockQuantity <= product.lowStockAt; return <div className="inventory-row" key={product.id}><span className={`product-avatar ${low ? 'avatar-warning' : ''}`}>{product.category === 'kg' ? <Scale size={17} /> : <Package size={17} />}</span><span className="inventory-name"><strong>{product.name}</strong><small>{product.category === 'kg' ? 'Per kilogram' : 'Per piece'}</small></span><span className={`stock-value ${low ? 'stock-low' : ''}`}>{stockLabel(product)} <small>{safeProductQuantity(product)}</small></span><span className={`stock-status ${low ? 'low' : ''}`}>{low ? 'Low stock' : 'In stock'}</span></div>; })}</div> : <EmptyState title="No products yet" message="Add your products to start billing." action={<button className="button button-outline button-sm" onClick={() => { setEditingProduct(null); setModal('product'); }}>Add product</button>} />}
           </section>
           <div className="profit-banner"><span className="profit-icon"><Sparkles size={18} /></span><div><strong>Estimated profit today</strong><small>Sales after discounts − product cost − shop expenses</small></div><b>{money(todayProfit)}</b></div>
         </>}
@@ -671,8 +649,8 @@ function App() {
           <section className="panel bill-products-panel"><div className="panel-heading"><div><h3>Select products</h3><p>Kg products open weight entry · pieces start at 1</p></div><span className="count-chip">{activeProducts.length} products</span></div>
             <div className="search-field bill-search"><Search size={17} /><input value={billSearch} onChange={(e) => setBillSearch(e.target.value)} placeholder="Search products…" /></div>
             <div className="quick-filter"><div className="bill-category-tabs" aria-label="Filter products"><button className={billCategoryFilter === 'all' ? 'selected' : ''} onClick={() => setBillCategoryFilter('all')}>All <b>{activeProducts.length}</b></button><button className={billCategoryFilter === 'kg' ? 'selected' : ''} onClick={() => setBillCategoryFilter('kg')}>Kg <b>{activeProducts.filter((product) => product.category === 'kg').length}</b></button><button className={billCategoryFilter === 'piece' ? 'selected' : ''} onClick={() => setBillCategoryFilter('piece')}>Piece <b>{activeProducts.filter((product) => product.category === 'piece').length}</b></button></div><span className="filter-count">Tap + to enter quantity</span></div>
-            <div className="bill-product-list">{visibleBillProducts.map((product) => <button className="bill-product" key={product.id} onClick={() => openAddQuantity(product)} disabled={product.category === 'piece' && product.stockQuantity <= 0} aria-label={`Enter quantity for ${product.name}`}>
-              <span className={`product-avatar ${product.category === 'kg' ? 'avatar-kg' : 'avatar-piece'}`}>{product.category === 'kg' ? <Scale size={17} /> : <Package size={17} />}</span><span className="bill-product-info"><strong>{product.name}</strong><small>{isUntrackedKg(product) ? 'Loose / By weight' : `${stockLabel(product)} ${safeProductQuantity(product)} left`}</small></span><span className="bill-product-price"><strong>{money(product.sellingPrice)}</strong><small>/ {product.category === 'kg' ? 'kg' : 'piece'}</small></span><span className="add-product-button"><Plus size={16} /></span>
+            <div className="bill-product-list">{visibleBillProducts.map((product) => <button className="bill-product" key={product.id} onClick={() => openAddQuantity(product)} disabled={product.stockQuantity <= 0} aria-label={`Enter quantity for ${product.name}`}>
+              <span className={`product-avatar ${product.category === 'kg' ? 'avatar-kg' : 'avatar-piece'}`}>{product.category === 'kg' ? <Scale size={17} /> : <Package size={17} />}</span><span className="bill-product-info"><strong>{product.name}</strong><small>{stockLabel(product)} {safeProductQuantity(product)} left</small></span><span className="bill-product-price"><strong>{money(product.sellingPrice)}</strong><small>/ {product.category === 'kg' ? 'kg' : 'piece'}</small></span><span className="add-product-button"><Plus size={16} /></span>
             </button>)}{visibleBillProducts.length === 0 && <EmptyState icon={Search} title="No matching products" message="Try a different search or filter." />}</div>
           </section>
           <section className="panel cart-panel" id="current-bill"><div className="panel-heading cart-heading"><div><h3>Current bill</h3><p>{cart.length} {cart.length === 1 ? 'product' : 'products'} selected</p></div><span className="cart-badge"><ReceiptText size={16} />{cart.length > 0 && <b>{cart.length}</b>}</span></div>
@@ -694,7 +672,7 @@ function App() {
 
         {activeTab === 'products' && <section className="panel page-panel"><div className="panel-heading panel-heading-wrap"><div><h3>Products</h3><p>Maintain selling prices and bulk stock</p></div><button className="button button-primary" onClick={() => { setEditingProduct(null); setModal('product'); }}><Plus size={17} /> Add product</button></div>
           <div className="toolbar"><div className="search-field"><Search size={17} /><input value={productSearch} onChange={(e) => setProductSearch(e.target.value)} placeholder="Search products…" /></div><div className="toolbar-summary"><span>{activeProducts.filter((product) => product.category === 'kg').length} kg</span><span className="toolbar-divider" /><span>{activeProducts.filter((product) => product.category === 'piece').length} piece</span></div></div>
-          {visibleProducts.length ? <div className="table-wrap"><table><thead><tr><th>PRODUCT</th><th>TYPE</th><th>BUY COST</th><th>SELLING PRICE</th><th>STOCK</th><th>STATUS</th><th></th></tr></thead><tbody>{visibleProducts.map((product) => { const low = product.category === 'piece' ? product.stockQuantity <= product.lowStockAt : (!isUntrackedKg(product) && product.lowStockAt > 0 && product.stockQuantity <= product.lowStockAt); return <tr key={product.id}><td><div className="table-product"><span className="product-avatar">{product.category === 'kg' ? <Scale size={16} /> : <Package size={16} />}</span><span><strong>{product.name}</strong><small>{product.retailPrice ? `Retail ${money(product.retailPrice)}` : product.discountPercent ? `${product.discountPercent}% offer` : product.category === 'kg' ? 'Loose / weighed item' : 'Sold per piece'}</small></span></div></td><td><span className={`type-chip ${product.category}`}>{product.category === 'kg' ? 'Kg product' : 'Piece product'}</span></td><td>{money(product.purchasePrice)} <small>/ {product.category === 'kg' ? 'kg' : 'pc'}</small></td><td><strong>{money(product.sellingPrice)}</strong> <small>/ {product.category === 'kg' ? 'kg' : 'pc'}</small></td><td><strong>{isUntrackedKg(product) ? 'Loose / Open' : stockLabel(product)}</strong> <small>{isUntrackedKg(product) ? '' : safeProductQuantity(product)}</small></td><td><span className={`status-chip ${low ? 'warning' : 'success'}`}><i />{low ? 'Low stock' : isUntrackedKg(product) ? 'Open stock' : 'In stock'}</span></td><td><div className="table-actions"><button className="icon-button" title="Add stock" aria-label={`Add stock for ${product.name}`} onClick={() => { setStockProduct(product); setModal('stock'); }}><PackagePlus size={17} /></button><button className="icon-button" title="Edit product" aria-label={`Edit ${product.name}`} onClick={() => { setEditingProduct(product); setModal('product'); }}><Pencil size={16} /></button><button className="icon-button danger-icon" title="Delete product" aria-label={`Delete ${product.name}`} onClick={() => deleteProduct(product)}><Trash2 size={16} /></button></div></td></tr>; })}</tbody></table></div> : <EmptyState icon={Package} title="No products found" message={productSearch ? 'Try a different product name.' : 'Add products to begin creating bills.'} action={!productSearch && <button className="button button-primary button-sm" onClick={() => { setEditingProduct(null); setModal('product'); }}><Plus size={15} /> Add product</button>} />}
+          {visibleProducts.length ? <div className="table-wrap"><table><thead><tr><th>PRODUCT</th><th>TYPE</th><th>BUY COST</th><th>SELLING PRICE</th><th>STOCK</th><th>STATUS</th><th></th></tr></thead><tbody>{visibleProducts.map((product) => { const low = product.stockQuantity <= product.lowStockAt; return <tr key={product.id}><td><div className="table-product"><span className="product-avatar">{product.category === 'kg' ? <Scale size={16} /> : <Package size={16} />}</span><span><strong>{product.name}</strong><small>{product.retailPrice ? `Retail ${money(product.retailPrice)}` : product.discountPercent ? `${product.discountPercent}% offer` : product.category === 'kg' ? 'Loose / weighed item' : 'Sold per piece'}</small></span></div></td><td><span className={`type-chip ${product.category}`}>{product.category === 'kg' ? 'Kg product' : 'Piece product'}</span></td><td>{money(product.purchasePrice)} <small>/ {product.category === 'kg' ? 'kg' : 'pc'}</small></td><td><strong>{money(product.sellingPrice)}</strong> <small>/ {product.category === 'kg' ? 'kg' : 'pc'}</small></td><td><strong>{stockLabel(product)}</strong> <small>{safeProductQuantity(product)}</small></td><td><span className={`status-chip ${low ? 'warning' : 'success'}`}><i />{low ? 'Low stock' : 'In stock'}</span></td><td><div className="table-actions"><button className="icon-button" title="Add stock" aria-label={`Add stock for ${product.name}`} onClick={() => { setStockProduct(product); setModal('stock'); }}><PackagePlus size={17} /></button><button className="icon-button" title="Edit product" aria-label={`Edit ${product.name}`} onClick={() => { setEditingProduct(product); setModal('product'); }}><Pencil size={16} /></button><button className="icon-button danger-icon" title="Delete product" aria-label={`Delete ${product.name}`} onClick={() => deleteProduct(product)}><Trash2 size={16} /></button></div></td></tr>; })}</tbody></table></div> : <EmptyState icon={Package} title="No products found" message={productSearch ? 'Try a different product name.' : 'Add products to begin creating bills.'} action={!productSearch && <button className="button button-primary button-sm" onClick={() => { setEditingProduct(null); setModal('product'); }}><Plus size={15} /> Add product</button>} />}
           <div className="stock-tip"><Info size={16} /><span><strong>Bulk stock:</strong> Add a product with its opening quantity, or choose the box icon to record a new stock purchase. Kg stock is tracked in kilograms; piece stock is tracked in whole pieces.</span></div>
         </section>}
 

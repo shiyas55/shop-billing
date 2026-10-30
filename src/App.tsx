@@ -87,27 +87,49 @@ function ConnectSupabaseScreen({ onConnect }: { onConnect: (url: string, key: st
   </div></main>;
 }
 
-function AuthScreen({ onLogin, onResetKey }: { onLogin: (email: string, password: string) => Promise<void>; onResetKey: () => void }) {
+function AuthScreen({ onLogin, onSignUp, onResetKey }: { onLogin: (email: string, password: string) => Promise<void>; onSignUp: (email: string, password: string) => Promise<void>; onResetKey: () => void }) {
+  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
   const [busy, setBusy] = useState(false);
   const submit = async (event: FormEvent) => {
-    event.preventDefault(); setBusy(true); setError('');
-    try { await onLogin(email, password); } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not sign in.'); }
-    finally { setBusy(false); }
+    event.preventDefault(); setBusy(true); setError(''); setInfo('');
+    try {
+      if (mode === 'signin') {
+        await onLogin(email, password);
+      } else {
+        await onSignUp(email, password);
+        setInfo('Account created! If your Supabase requires email verification, check your inbox; otherwise you can sign in directly.');
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Authentication failed.');
+    } finally {
+      setBusy(false);
+    }
   };
   return <main className="auth-shell"><div className="auth-card">
     <div className="auth-brand"><span className="brand-mark"><ShoppingBag size={22} /></span><span>Shop Billing</span></div>
-    <p className="eyebrow">OWNER ACCESS</p><h1>Welcome back</h1><p className="muted">Sign in with your owner email and password.</p>
+    <div className="segmented" style={{ marginBottom: '16px' }}>
+      <button type="button" className={mode === 'signin' ? 'selected' : ''} onClick={() => { setMode('signin'); setError(''); setInfo(''); }}>Sign in</button>
+      <button type="button" className={mode === 'signup' ? 'selected' : ''} onClick={() => { setMode('signup'); setError(''); setInfo(''); }}>Create account</button>
+    </div>
+    <p className="eyebrow">OWNER ACCESS</p>
+    <h1>{mode === 'signin' ? 'Welcome back' : 'Create owner account'}</h1>
+    <p className="muted">{mode === 'signin' ? 'Sign in with your owner email and password.' : 'Register your owner email and password to manage your shop.'}</p>
     <form onSubmit={submit} className="form-stack">
       <label>Email address<input required type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="admin@gmail.com" /></label>
-      <label>Password<input required type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Your password" /></label>
+      <label>Password<input required type="password" minLength={6} autoComplete={mode === 'signin' ? 'current-password' : 'new-password'} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 6 characters" /></label>
       {error && <p className="form-error">{error}</p>}
-      <button className="button button-primary button-full" disabled={busy}>{busy ? <LoaderCircle className="spin" size={17} /> : null} Sign in</button>
+      {info && <p className="form-info" style={{ margin: 0, padding: '10px 12px', borderRadius: '8px', color: '#276b4e', background: '#eef6f0', fontSize: '12px' }}>{info}</p>}
+      <button className="button button-primary button-full" disabled={busy}>{busy ? <LoaderCircle className="spin" size={17} /> : null} {mode === 'signin' ? 'Sign in' : 'Create account & Sign in'}</button>
     </form>
-    <div className="auth-key-switch" style={{ marginTop: '14px', textAlign: 'center' }}>
-      <button type="button" className="text-button" style={{ fontSize: '11px', color: '#688273' }} onClick={onResetKey}>Change Supabase API key</button>
+    <div className="auth-key-switch" style={{ marginTop: '14px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <button type="button" className="text-button" style={{ fontSize: '11px', color: '#35714f', fontWeight: 600 }} onClick={() => { setMode(mode === 'signin' ? 'signup' : 'signin'); setError(''); setInfo(''); }}>
+        {mode === 'signin' ? "Don't have an account yet? Create one" : 'Already have an account? Sign in'}
+      </button>
+      <button type="button" className="text-button" style={{ fontSize: '10px', color: '#88988e' }} onClick={onResetKey}>Change Supabase API key</button>
     </div>
   </div></main>;
 }
@@ -404,7 +426,21 @@ function App() {
   const login = async (email: string, password: string) => {
     if (!supabase) throw new Error('Supabase is not configured.');
     const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    if (error) {
+      if (error.message.toLowerCase().includes('invalid login credentials')) {
+        throw new Error('Invalid email or password. If you haven’t created an account yet, switch to "Create account" above.');
+      }
+      throw error;
+    }
+  };
+
+  const signup = async (email: string, password: string) => {
+    if (!supabase) throw new Error('Supabase is not configured.');
+    const { data, error } = await supabase.auth.signUp({ email: email.trim(), password });
     if (error) throw error;
+    if (data.session) {
+      setSession(data.session);
+    }
   };
 
   const createShop = async (name: string) => {
@@ -551,7 +587,7 @@ function App() {
 
   if (!isSupabaseConfigured) return <ConnectSupabaseScreen onConnect={(url, key) => { saveSupabaseConfig(key, url); window.location.reload(); }} />;
   if (!sessionChecked) return <main className="loading-screen"><LoaderCircle className="spin" size={28} /><span>Checking sign-in…</span></main>;
-  if (!session) return <AuthScreen onLogin={login} onResetKey={() => { clearSupabaseConfig(); window.location.reload(); }} />;
+  if (!session) return <AuthScreen onLogin={login} onSignUp={signup} onResetKey={() => { clearSupabaseConfig(); window.location.reload(); }} />;
   if (session && !cloudReady) return <main className="loading-screen"><LoaderCircle className="spin" size={28} /><span>Loading shop database…</span></main>;
   if (session && !cloudShop && !cloudError) return <SetupShopScreen onCreate={createShop} error="" />;
   if (session && !cloudShop && cloudError) return <div className="setup-error"><div className="auth-card"><div className="auth-brand"><span className="brand-mark"><Store size={22} /></span><span>Shop Billing setup</span></div><h1>Database setup needed</h1><p className="muted">The app could not load the shop database. Apply the included SQL migration in Supabase, then reload this page.</p><pre>{cloudError}</pre><button className="button button-outline" onClick={() => window.location.reload()}><RefreshCw size={16} /> Reload</button></div></div>;
